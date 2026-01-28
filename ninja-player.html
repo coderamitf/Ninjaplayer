@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<meta charset="UTF-8">
+<title>Ninja Player Pro Ultimate</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#8a2be2">
+
+<style>
+body {
+  margin:0;
+  background: radial-gradient(circle at top,#12002b,#000);
+  color:white;
+  font-family:Arial,sans-serif;
+  display:flex;
+  justify-content:center;
+  align-items:center;
+  height:100vh;
+}
+
+.player{
+  width:95%;
+  max-width:400px;
+  background:rgba(0,0,0,0.85);
+  backdrop-filter:blur(12px);
+  padding:20px;
+  border-radius:25px;
+  box-shadow:0 0 40px #8a2be2;
+}
+
+h2{text-align:center;color:#c77dff;margin:5px 0;}
+#nowPlaying{text-align:center;font-size:13px;color:#aaa;margin-bottom:10px;}
+
+.upload label{
+  display:block;
+  background:linear-gradient(45deg,#8a2be2,#ff00ff);
+  padding:10px;
+  border-radius:20px;
+  text-align:center;
+  cursor:pointer;
+  margin-bottom:10px;
+  font-weight:bold;
+}
+.upload input{display:none;}
+
+audio,video{width:100%;border-radius:10px;margin-bottom:5px;}
+canvas{width:100%;height:70px;margin:10px 0;}
+
+.controls{
+  display:flex;
+  justify-content:space-between;
+  margin:10px 0;
+}
+.controls button{
+  flex:1;
+  margin:0 5px;
+  border:none;
+  border-radius:15px;
+  padding:10px;
+  background:#8a2be2;
+  color:white;
+  font-size:16px;
+  cursor:pointer;
+  box-shadow:0 0 10px #8a2be2;
+}
+
+.volume input{width:100%;}
+
+ul{
+  list-style:none;
+  padding:0;
+  max-height:160px;
+  overflow-y:auto;
+}
+li{
+  padding:7px;
+  font-size:13px;
+  border-bottom:1px solid #333;
+  cursor:pointer;
+}
+li.active{
+  color:#ff00ff;
+  font-weight:bold;
+}
+
+.lyrics{
+  margin-top:10px;
+  font-size:12px;
+  text-align:center;
+  color:#8a2be2;
+}
+</style>
+</head>
+
+<body>
+<div class="player">
+<h2>🥷 Ninja Player Pro Ultimate</h2>
+<div id="nowPlaying">No media playing</div>
+
+<div class="upload">
+<label for="fileInput">➕ Add Music / Video</label>
+<input type="file" id="fileInput" accept="audio/*,video/*" multiple>
+</div>
+
+<audio id="audio" controls></audio>
+<video id="video" controls style="display:none"></video>
+
+<canvas id="visualizer"></canvas>
+
+<div class="controls">
+<button onclick="prev()">⏮</button>
+<button onclick="recommend()">🎯</button>
+<button onclick="next()">⏭</button>
+</div>
+
+<div class="volume">🔊 Volume
+<input type="range" min="0" max="1" step="0.01" value="1" id="volume">
+</div>
+
+<ul id="playlist"></ul>
+<div class="lyrics" id="lyrics">🎵 Lyrics will appear here (if uploaded)</div>
+</div>
+
+<script>
+const audio=document.getElementById("audio");
+const video=document.getElementById("video");
+const fileInput=document.getElementById("fileInput");
+const playlistUI=document.getElementById("playlist");
+const nowPlaying=document.getElementById("nowPlaying");
+const volume=document.getElementById("volume");
+const canvas=document.getElementById("visualizer");
+const ctx=canvas.getContext("2d");
+const lyricsUI=document.getElementById("lyrics");
+
+let list=[];
+let lyricsList={};
+let index=0;
+let audioCtx,analyser,source;
+
+fileInput.onchange=()=>{
+  Array.from(fileInput.files).forEach(f=>{
+    list.push(f);
+    if(f.name.endsWith(".lrc")){
+      const reader=new FileReader();
+      reader.onload=e=>lyricsList[f.name.replace(".lrc","")]=e.target.result;
+      reader.readAsText(f);
+    }
+  });
+  render();
+  play(0);
+};
+
+function render(){
+  playlistUI.innerHTML="";
+  list.forEach((f,i)=>{
+    let li=document.createElement("li");
+    li.textContent=f.name;
+    li.onclick=()=>play(i);
+    playlistUI.appendChild(li);
+  });
+}
+
+function play(i){
+  if(!list.length)return;
+  index=i;
+  let file=list[i];
+  let url=URL.createObjectURL(file);
+  let isVideo=file.type.startsWith("video");
+  audio.style.display=isVideo?"none":"block";
+  video.style.display=isVideo?"block":"none";
+  let player=isVideo?video:audio;
+  player.src=url;
+  player.play();
+  nowPlaying.textContent="Now Playing: "+file.name;
+  lyricsUI.textContent=lyricsList[file.name]||"🎵 Lyrics not found";
+  document.querySelectorAll("li").forEach((l,n)=>l.classList.toggle("active",n===i));
+  setupVisualizer(player);
+}
+
+function next(){play((index+1)%list.length);}
+function prev(){play((index-1+list.length)%list.length);}
+volume.oninput=()=>{audio.volume=video.volume=volume.value;}
+
+// Spotify-style recommendation
+function recommend(){
+  if(list.length<2)return;
+  let base=list[index];
+  let best=index,diff=Infinity;
+  list.forEach((s,i)=>{
+    if(i!==index){
+      let d=Math.abs((s.size||0)-(base.size||0));
+      if(d<diff){diff=d;best=i;}
+    }
+  });
+  play(best);
+}
+
+// Visualizer
+function setupVisualizer(player){
+  if(audioCtx)audioCtx.close();
+  audioCtx=new AudioContext();
+  analyser=audioCtx.createAnalyser();
+  source=audioCtx.createMediaElementSource(player);
+  source.connect(analyser);
+  analyser.connect(audioCtx.destination);
+  draw();
+}
+function draw(){
+  requestAnimationFrame(draw);
+  if(!analyser)return;
+  let data=new Uint8Array(analyser.frequencyBinCount);
+  analyser.getByteFrequencyData(data);
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  data.slice(0,40).forEach((v,i)=>{
+    ctx.fillStyle=`rgb(${v+100},0,255)`;
+    ctx.fillRect(i*8,canvas.height,6,-v/2);
+  });
+}
+
+// Gesture swipe for next/prev (mobile)
+let touchStartX=0;
+document.addEventListener("touchstart",e=>{touchStartX=e.touches[0].clientX;});
+document.addEventListener("touchend",e=>{
+  let diff=e.changedTouches[0].clientX-touchStartX;
+  if(diff>50)prev();
+  else if(diff<-50)next();
+});
+
+// Register service worker for offline support (PWA)
+if("serviceWorker"in navigator){
+  navigator.serviceWorker.register("service-worker.js");
+}
+</script>
+
+</body>
+</html>
